@@ -2,7 +2,7 @@
 
 ## Version 2.1
 
-- `Show All Data` Add `Live Formula` evaluator for formula fields: expand an inline card to see the formula evaluated against the current record, hover or click any sub-expression (an `IF`, a comparison, a field) to see its value, and edit input values for what-if simulation (client-side, powered by the bundled [sformula](https://github.com/stomita/sformula) parser) [feature #1215](https://github.com/tprouvot/Salesforce-Inspector-reloaded/issues/1215)
+- `Show All Data` Add `Live Formula` evaluator for formula fields: expand an inline card to see the formula evaluated against the current record, hover or click any sub-expression (an `IF`, a comparison, a field) to see its value, and edit input values for what-if simulation. Cross-object/parent fields and the `$User` / `$Profile` / `$UserRole` / `$Organization` globals are auto-resolved from your context (any field, not just `Id`). Client-side, powered by the bundled [sformula](https://github.com/stomita/sformula) parser [feature #1215](https://github.com/tprouvot/Salesforce-Inspector-reloaded/issues/1215)
 - `Metadata Retrieve` Fix sort preference (`Sort metadata by`) not persisting due to misspelled localStorage key
 - `Popup` Add filter icon and menu on User tab search input [discussion #1147](https://github.com/tprouvot/Salesforce-Inspector-reloaded/discussions/1147)
 - `Event Monitor` Allow users to generate, publish and save Platform Events based on their definition

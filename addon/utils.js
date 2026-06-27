@@ -347,6 +347,13 @@ export async function getUserInfo() {
       userFullName: res.userFullName,
       userInitials: res.userFullName.split(" ").map(n => n[0]).join(""),
       userName: res.userName,
+      // Context ids for resolving formula globals ($User / $Profile / $UserRole /
+      // $Organization). The SOAP response carries these; callers that only need
+      // display names can ignore them.
+      userId: res.userId,
+      profileId: res.profileId,
+      roleId: res.roleId,
+      organizationId: res.organizationId,
       userError: null,
       userErrorDescription: null
     };
@@ -358,6 +365,10 @@ export async function getUserInfo() {
       userFullName: "Unknown User",
       userInitials: "?",
       userName: "Unknown",
+      userId: null,
+      profileId: null,
+      roleId: null,
+      organizationId: null,
       userError: "Error fetching user info",
       userErrorDescription: "Session is probably expired or invalid"
     };

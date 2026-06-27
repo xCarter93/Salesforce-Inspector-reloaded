@@ -15,6 +15,8 @@ const accountRecords = [
     Type: "Customer - Direct",
     // eslint-disable-next-line camelcase
     FormulaCheck__c: "Long",
+    // eslint-disable-next-line camelcase
+    FormulaGlobalCheck__c: "stored value",
     CreatedBy: {Alias: "testuser"},
     LastModifiedBy: {Alias: "testuser"},
     CreatedDate: "2021-01-01T00:00:00Z",
@@ -27,6 +29,8 @@ const accountRecords = [
     Type: "Customer - Channel",
     // eslint-disable-next-line camelcase
     FormulaCheck__c: "Long",
+    // eslint-disable-next-line camelcase
+    FormulaGlobalCheck__c: "stored value",
     CreatedBy: {Alias: "testuser"},
     LastModifiedBy: {Alias: "testuser"},
     CreatedDate: "2021-01-01T00:00:00Z",
@@ -182,7 +186,8 @@ export async function routeMock(route, host) {
             ],
             referenceTo: []},
           {name: "Description", label: "Description", type: "textarea", createable: true, updateable: true, nillable: true, referenceTo: []},
-          {name: "FormulaCheck__c", label: "Formula Check", type: "string", calculated: true, calculatedFormula: "\"Summary | Name: \" & Name & \" | Type: \" & IF(ISBLANK(TEXT(Type)), \"Unknown\", TEXT(Type)) & \" | Upper: \" & UPPER(Name) & \" | Length check: \" & IF(LEN(Name) > 3, \"Long\", \"Short\") & \" | Contains Test: \" & IF(CONTAINS(UPPER(Name), \"TEST\"), \"Yes\", \"No\") & \" | Padding text to make this formula result wide enough to exercise horizontal wrapping in the card\"", createable: false, updateable: false, nillable: true, referenceTo: []}
+          {name: "FormulaCheck__c", label: "Formula Check", type: "string", calculated: true, calculatedFormula: "\"Summary | Name: \" & Name & \" | Type: \" & IF(ISBLANK(TEXT(Type)), \"Unknown\", TEXT(Type)) & \" | Upper: \" & UPPER(Name) & \" | Length check: \" & IF(LEN(Name) > 3, \"Long\", \"Short\") & \" | Contains Test: \" & IF(CONTAINS(UPPER(Name), \"TEST\"), \"Yes\", \"No\") & \" | Padding text to make this formula result wide enough to exercise horizontal wrapping in the card\"", createable: false, updateable: false, nillable: true, referenceTo: []},
+          {name: "FormulaGlobalCheck__c", label: "Formula Global Check", type: "string", calculated: true, calculatedFormula: "\"U:\" & $User.Username & \" P:\" & $Profile.Name & \" O:\" & $Organization.OrganizationType", createable: false, updateable: false, nillable: true, referenceTo: []}
         ],
         childRelationships: [
           {relationshipName: "Contacts", childSObject: "Contact", field: "AccountId"}
@@ -232,6 +237,8 @@ export async function routeMock(route, host) {
     if (url.includes("/sobjects/User/describe")) {
       await fulfillSuccess(route, {
         fields: [
+          {name: "Id", label: "User ID", type: "id"},
+          {name: "Username", label: "Username", type: "string"},
           {
             name: "LanguageLocaleKey",
             picklistValues: [
@@ -246,6 +253,26 @@ export async function routeMock(route, host) {
               {value: "fr_FR", label: "French (France)", active: true}
             ]
           }
+        ]
+      });
+      return true;
+    }
+
+    // Describes for formula global namespaces ($Profile / $Organization).
+    if (url.includes("/sobjects/Profile/describe")) {
+      await fulfillSuccess(route, {
+        fields: [
+          {name: "Id", label: "Profile ID", type: "id"},
+          {name: "Name", label: "Name", type: "string"}
+        ]
+      });
+      return true;
+    }
+    if (url.includes("/sobjects/Organization/describe")) {
+      await fulfillSuccess(route, {
+        fields: [
+          {name: "Id", label: "Organization ID", type: "id"},
+          {name: "OrganizationType", label: "Edition", type: "string"}
         ]
       });
       return true;
@@ -326,6 +353,17 @@ export async function routeMock(route, host) {
             type: "Organization",
             url: `/services/data/v${apiVersion}/sobjects/Organization/00D000000000000000`
           }]
+        });
+        return true;
+      }
+
+      // Formula global resolution: $Profile.* (see resolveGlobals). $User.* and
+      // $Organization.* reuse the existing User / Organization query mocks (below
+      // and above) - we only add the Profile query, which has no other handler.
+      if (query.includes("from profile") || query.includes("from+profile")) {
+        await fulfillSuccess(route, {totalSize: 1,
+          done: true,
+          records: [{Id: "00e000000000001AAA", Name: "System Administrator", type: "Profile"}]
         });
         return true;
       }
@@ -1074,6 +1112,10 @@ function createGetUserInfoSoapResponse() {
         <soapenv:Body>
           <getUserInfoResponse>
             <result>
+              <userId>005000000000001AAA</userId>
+              <profileId>00e000000000001AAA</profileId>
+              <roleId>00E000000000001AAA</roleId>
+              <organizationId>00D000000000000000</organizationId>
               <userFullName>Test User</userFullName>
               <userName>test@example.com</userName>
               <organizationName>Test Org</organizationName>

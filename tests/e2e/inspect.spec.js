@@ -388,6 +388,40 @@ test.describe("Inspect", () => {
     await expect(card.locator(".sfir-formula-pop")).toBeVisible();
   });
 
+  test("Live Formula resolves globals ($User / $Profile / $Organization)", async ({page, extensionId}) => {
+    await initInspectPage(page, extensionId, TEST_CONSTANTS.accountRecordId);
+    await page.waitForSelector("table.slds-table", {timeout: 2000});
+
+    // Isolate the formula that references $User / $Profile / $Organization globals
+    await page.locator("input[placeholder='Filter']").fill("FormulaGlobalCheck__c");
+    await page.waitForTimeout(300);
+
+    const row = page.locator("tr", {hasText: "FormulaGlobalCheck__c"}).first();
+    await row.locator("td.field-actions button").click();
+    await page.waitForTimeout(200);
+    await page.locator("a:has-text('Live Formula')").click();
+
+    const card = page.locator(".sfir-formula-card");
+    await expect(card).toBeVisible();
+
+    // The globals are auto-filled from the running user's context (getUserInfo +
+    // describe + SOQL), so the result resolves the User, Profile and Organization
+    // field values rather than leaving them blank. This auto-retries while the
+    // async resolution completes.
+    const result = card.locator(".sfir-formula-result");
+    await expect(result).toContainText("integration@example.com", {timeout: 4000});
+    await expect(result).toContainText("System Administrator");
+    await expect(result).toContainText("Enterprise Edition");
+
+    // The inputs table lists the global references with their namespace badge,
+    // and nothing remains stuck in the "resolving" state.
+    const inputs = card.locator(".sfir-formula-inputs");
+    await expect(inputs).toContainText("$User.Username");
+    await expect(inputs).toContainText("$Profile.Name");
+    await expect(inputs).toContainText("global");
+    await expect(card).not.toContainText("resolving");
+  });
+
   test("Relationship Actions Menu", async ({page, extensionId}) => {
     await initInspectPage(page, extensionId);
 

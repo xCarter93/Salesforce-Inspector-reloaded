@@ -161,6 +161,16 @@ function getByPath(record, dottedPath) {
   return cursor === undefined ? null : cursor;
 }
 
+// Formula global namespaces we can resolve against the running user's context,
+// mapped to the sObject that supplies their fields. A reference like $User.Email
+// becomes "SELECT Email FROM User WHERE Id = <current user id>".
+const GLOBAL_NAMESPACES = {
+  $User: "User",
+  $Profile: "Profile",
+  $UserRole: "UserRole",
+  $Organization: "Organization",
+};
+
 function classifyField(path) {
   if (path.startsWith("$")) {
     return "global";
@@ -169,6 +179,14 @@ function classifyField(path) {
     return "related";
   }
   return "local";
+}
+
+// A global reference is resolvable when it is a single field on one of the
+// namespaces above (e.g. $User.Email), as opposed to $Label.* / $Setup.* or a
+// deeper traversal we can't fetch with one query.
+function isResolvableGlobal(path) {
+  const parts = path.split(".");
+  return parts.length === 2 && Object.prototype.hasOwnProperty.call(GLOBAL_NAMESPACES, parts[0]);
 }
 
 function describeError(err) {
@@ -243,20 +261,24 @@ export class FormulaEvalModel {
     this.refByPath = {};
     this.references = paths.map(path => {
       const kind = classifyField(path);
-      let type = null;
-      let available = false;
+      const ref = {path, kind, type: null, available: false};
       if (kind === "local") {
         const describe = this.getFieldDescribe(path);
-        type = sfTypeToSformula(describe);
-        available = !!describe;
+        ref.type = sfTypeToSformula(describe);
+        ref.available = !!describe;
       } else if (kind === "global") {
-        // Globals ($User, $Profile, ...) can't be auto-resolved; expose them as
-        // editable text inputs the user can fill in for a what-if evaluation.
-        type = {type: "string"};
-        available = true;
+        // Globals start as editable text inputs. The $User / $Profile / $UserRole /
+        // $Organization namespaces are auto-filled from the running user's context
+        // by resolveGlobals(); until that completes they are marked pending. Other
+        // globals ($Label, $Setup, ...) stay editable for what-if evaluation.
+        ref.type = {type: "string"};
+        ref.available = true;
+        if (isResolvableGlobal(path)) {
+          ref.resolvable = true;
+          ref.pending = true;
+        }
       }
       // "related" (cross-object) refs stay unresolved until resolveRelated() runs.
-      const ref = {path, kind, type, available};
       this.refByPath[path] = ref;
       return ref;
     });
@@ -343,6 +365,106 @@ export class FormulaEvalModel {
     this._buildInputTypes();
     this._evaluate();
     return this;
+  }
+
+  // Resolve global references ($User / $Profile / $UserRole / $Organization)
+  // against the running user's context. Each referenced field is typed from the
+  // object describe and valued from a single SOQL query, so *any* field on those
+  // objects resolves - not just Id. Mirrors resolveRelated(); call after build().
+  //   ids       -> {userId, profileId, roleId, organizationId}
+  //   describe(sobjectName) -> Promise<Salesforce describe response>
+  //   query(soql)           -> Promise<records[]>
+  async resolveGlobals(options) {
+    const ids = options.ids || {};
+    const idByNamespace = {
+      $User: ids.userId,
+      $Profile: ids.profileId,
+      $UserRole: ids.roleId,
+      $Organization: ids.organizationId,
+    };
+
+    // Group resolvable global refs by namespace -> {fieldName: path}.
+    const byNamespace = {};
+    for (const ref of this.references) {
+      if (!ref.resolvable) {
+        continue;
+      }
+      const parts = ref.path.split(".");
+      byNamespace[parts[0]] = byNamespace[parts[0]] || {};
+      byNamespace[parts[0]][parts[1]] = ref.path;
+    }
+
+    const namespaces = Object.keys(byNamespace);
+    if (namespaces.length) {
+      await Promise.all(namespaces.map(namespace => this._resolveGlobalNamespace({
+        sobject: GLOBAL_NAMESPACES[namespace],
+        recordId: idByNamespace[namespace],
+        fields: byNamespace[namespace],
+        describe: options.describe,
+        query: options.query,
+      })));
+    }
+
+    // Clear the pending flag for every resolvable ref (resolved or not) so the
+    // card stops showing "resolving...".
+    for (const ref of this.references) {
+      if (ref.resolvable) {
+        ref.pending = false;
+      }
+    }
+
+    this._buildInputTypes();
+    this._evaluate();
+    return this;
+  }
+
+  async _resolveGlobalNamespace(opts) {
+    const fieldNames = Object.keys(opts.fields);
+
+    // Discover valid field names + their types from the object describe.
+    let describeByField = {};
+    try {
+      const desc = await opts.describe(opts.sobject);
+      for (const field of (desc && desc.fields) || []) {
+        describeByField[field.name.toLowerCase()] = field;
+      }
+    } catch {
+      describeByField = {};
+    }
+
+    // Only query fields the describe confirms exist, so one bad/unreadable field
+    // name doesn't fail the whole SOQL. Id is always safe to select.
+    const haveDescribe = Object.keys(describeByField).length > 0;
+    const queryable = fieldNames.filter(name =>
+      name.toLowerCase() === "id" || !haveDescribe || describeByField[name.toLowerCase()]);
+
+    // Organization is a singleton (no Id filter); the others filter by context id.
+    let record = null;
+    if (queryable.length && (opts.sobject === "Organization" || opts.recordId)) {
+      const where = opts.sobject === "Organization" ? "" : " WHERE Id = '" + opts.recordId + "'";
+      const soql = "SELECT " + queryable.join(", ") + " FROM " + opts.sobject + where + " LIMIT 1";
+      try {
+        const records = await opts.query(soql);
+        record = records && records[0] ? records[0] : null;
+      } catch {
+        record = null;
+      }
+    }
+
+    for (const fieldName of fieldNames) {
+      const path = opts.fields[fieldName];
+      const ref = this.refByPath[path];
+      const type = sfTypeToSformula(describeByField[fieldName.toLowerCase()]) || {type: "string"};
+      const value = record && Object.prototype.hasOwnProperty.call(record, fieldName) && record[fieldName] !== undefined
+        ? record[fieldName]
+        : null;
+      this.externalValues[path] = {value, type};
+      if (ref) {
+        ref.type = type;
+        ref.available = true;
+        ref.resolved = record != null;
+      }
+    }
   }
 
   // Current input value for a reference path (override > external > record > null).

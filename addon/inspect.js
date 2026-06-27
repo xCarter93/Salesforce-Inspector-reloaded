@@ -4,7 +4,7 @@ import {copyToClipboard, downloadCsvFile, applyProductionStyling} from "./utils.
 /* global initButton */
 import {getObjectSetupLinks, getFieldSetupLinks} from "./setup-links.js";
 import {PageHeader} from "./components/PageHeader.js";
-import {UserInfoModel, PromptTemplate, Constants} from "./utils.js";
+import {UserInfoModel, PromptTemplate, Constants, getUserInfo} from "./utils.js";
 import AgentforceModal from "./components/AgentforceModal.js";
 import {FormulaEvalModel, sfTypeToSformula} from "./formula-eval.js";
 import FormulaEvalCard from "./components/FormulaEvalCard.js";
@@ -1357,32 +1357,52 @@ class FieldRow extends TableRow {
     this.fieldActionsOpen = false;
     this.rowList.model.didUpdate();
   }
-  // Asynchronously resolve cross-object (related) field types and values for the
-  // Live Formula card, so references like Account.Name evaluate against real data.
+  // Asynchronously resolve cross-object (related) field types and values, plus
+  // global references ($User / $Profile / ...), for the Live Formula card so that
+  // references like Account.Name or $User.Email evaluate against real data.
   resolveFormulaRelationships(formulaEval, model) {
     if (!model.recordData || !model.recordData.Id) {
       return;
     }
-    if (!formulaEval.references.some(ref => ref.kind === "related")) {
-      return;
-    }
     let objectName = model.objectName();
     let recordId = model.recordData.Id;
-    let apiPrefix = "/services/data/v" + apiVersion + "/" + (model.useToolingApi ? "tooling/" : "");
-    let describeCache = {};
-    model.spinFor("evaluating formula relationships", formulaEval.resolveRelated({
-      sobjectName: objectName,
-      describe: name => {
-        if (!describeCache[name]) {
-          describeCache[name] = sfConn.rest(apiPrefix + "sobjects/" + name + "/describe/");
-        }
-        return describeCache[name];
-      },
-      fetchRecord: paths => {
-        let soql = "SELECT " + paths.join(", ") + " FROM " + objectName + " WHERE Id = '" + recordId + "' LIMIT 1";
-        return sfConn.rest(apiPrefix + "query/?q=" + encodeURIComponent(soql)).then(res => res.records && res.records[0]);
-      },
-    }).then(() => model.didUpdate()));
+
+    // Related (cross-object) refs share the inspected record's API context.
+    if (formulaEval.references.some(ref => ref.kind === "related")) {
+      let apiPrefix = "/services/data/v" + apiVersion + "/" + (model.useToolingApi ? "tooling/" : "");
+      let describeCache = {};
+      model.spinFor("evaluating formula relationships", formulaEval.resolveRelated({
+        sobjectName: objectName,
+        describe: name => {
+          if (!describeCache[name]) {
+            describeCache[name] = sfConn.rest(apiPrefix + "sobjects/" + name + "/describe/");
+          }
+          return describeCache[name];
+        },
+        fetchRecord: paths => {
+          let soql = "SELECT " + paths.join(", ") + " FROM " + objectName + " WHERE Id = '" + recordId + "' LIMIT 1";
+          return sfConn.rest(apiPrefix + "query/?q=" + encodeURIComponent(soql)).then(res => res.records && res.records[0]);
+        },
+      }).then(() => model.didUpdate()));
+    }
+
+    // Globals ($User / $Profile / $UserRole / $Organization) are standard objects,
+    // so always resolve them through the regular data API (even when the inspected
+    // record itself uses the Tooling API). Their ids come from getUserInfo().
+    if (formulaEval.references.some(ref => ref.resolvable)) {
+      let dataPrefix = "/services/data/v" + apiVersion + "/";
+      let describeCache = {};
+      model.spinFor("resolving formula globals", getUserInfo().then(info => formulaEval.resolveGlobals({
+        ids: {userId: info.userId, profileId: info.profileId, roleId: info.roleId, organizationId: info.organizationId},
+        describe: name => {
+          if (!describeCache[name]) {
+            describeCache[name] = sfConn.rest(dataPrefix + "sobjects/" + name + "/describe/");
+          }
+          return describeCache[name];
+        },
+        query: soql => sfConn.rest(dataPrefix + "query/?q=" + encodeURIComponent(soql)).then(res => res.records || []),
+      })).then(() => model.didUpdate()));
+    }
   }
   showFieldMetadata() {
     this.rowList.model.showDetailsBox(this.fieldName, this.rowProperties(), this.rowList);

@@ -140,8 +140,8 @@ export default class FormulaEvalCard extends React.Component {
     let typeName = ref.type ? ref.type.type : null;
 
     let control;
-    if (ref.kind === "related" && !ref.available) {
-      // Cross-object value still being fetched (or could not be resolved).
+    if ((ref.kind === "related" && !ref.available) || ref.pending) {
+      // Cross-object / global value still being fetched (or could not be resolved).
       control = h("span", {className: "slds-text-color_weak"}, ref.resolveFailed ? "could not resolve" : "resolving…");
     } else if (typeName === "boolean") {
       control = h("input", {
@@ -233,7 +233,7 @@ export default class FormulaEvalCard extends React.Component {
         inputs ? h("div", {className: "sfir-formula-side"}, inputs) : null
       ),
       h("div", {className: "sfir-formula-card-footer slds-text-body_small slds-text-color_weak slds-m-top_x-small"},
-        "Hover or click any part to see its value. Globals and related fields are resolved in a later step.")
+        "Hover or click any part to see its value. Related fields and $User / $Profile / $UserRole / $Organization globals are auto-filled from your context; edit any input to simulate.")
     );
   }
 }
