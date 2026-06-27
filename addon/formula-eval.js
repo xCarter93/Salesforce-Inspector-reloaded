@@ -294,7 +294,11 @@ export class FormulaEvalModel {
     }
     const ref = this.refByPath[path];
     if (ref && ref.kind === "global") {
-      return true;
+      // Globals are editable what-if inputs that default to blank (incl. the
+      // unsupported $Label / $Setup namespaces), EXCEPT a resolvable global
+      // whose auto-resolution hit a hard error - that surfaces as unresolved
+      // rather than a fabricated blank value.
+      return !ref.resolveFailed;
     }
     if (ref && ref.kind === "local" && ref.available) {
       return true;
@@ -340,17 +344,23 @@ export class FormulaEvalModel {
       dict = {};
     }
 
+    // A hard fetch error is distinct from a fetch that succeeds and returns a
+    // genuinely empty parent: the former must surface as "could not resolve",
+    // the latter degrades to a real blank. Track the failure explicitly so we
+    // never present a failed lookup as a successful null-derived value.
     let record = null;
+    let fetchFailed = false;
     try {
       record = await fetchRecord(relatedPaths);
     } catch {
       record = null;
+      fetchFailed = true;
     }
 
     for (const path of relatedPaths) {
       const ref = this.refByPath[path];
       const leafType = leafTypeFromDict(dict, path);
-      if (leafType) {
+      if (leafType && !fetchFailed) {
         const value = record ? getByPath(record, path) : null;
         this.externalValues[path] = {value: value === undefined ? null : value, type: leafType};
         if (ref) {
@@ -358,7 +368,12 @@ export class FormulaEvalModel {
           ref.available = true;
         }
       } else if (ref) {
+        // Either the type couldn't be determined (describe failed) or the value
+        // fetch threw - both mean we have no trustworthy value to show.
         ref.resolveFailed = true;
+        if (leafType) {
+          ref.type = leafType;
+        }
       }
     }
 
@@ -440,6 +455,7 @@ export class FormulaEvalModel {
 
     // Organization is a singleton (no Id filter); the others filter by context id.
     let record = null;
+    let queryFailed = false;
     if (queryable.length && (opts.sobject === "Organization" || opts.recordId)) {
       const where = opts.sobject === "Organization" ? "" : " WHERE Id = '" + opts.recordId + "'";
       const soql = "SELECT " + queryable.join(", ") + " FROM " + opts.sobject + where + " LIMIT 1";
@@ -448,6 +464,7 @@ export class FormulaEvalModel {
         record = records && records[0] ? records[0] : null;
       } catch {
         record = null;
+        queryFailed = true;
       }
     }
 
@@ -455,6 +472,17 @@ export class FormulaEvalModel {
       const path = opts.fields[fieldName];
       const ref = this.refByPath[path];
       const type = sfTypeToSformula(describeByField[fieldName.toLowerCase()]) || {type: "string"};
+      if (queryFailed) {
+        // A hard SOQL failure must not masquerade as a resolved blank value -
+        // mark it unresolved so the card surfaces it rather than computing a
+        // result from a fabricated null.
+        if (ref) {
+          ref.type = type;
+          ref.resolveFailed = true;
+          ref.resolved = false;
+        }
+        continue;
+      }
       const value = record && Object.prototype.hasOwnProperty.call(record, fieldName) && record[fieldName] !== undefined
         ? record[fieldName]
         : null;

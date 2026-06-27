@@ -338,7 +338,23 @@ export async function setOrgInfo(sfHost) {
   return orgInfo;
 }
 
-export async function getUserInfo() {
+// Memoized result of the running user's getUserInfo SOAP call. The user/org
+// context is stable for the lifetime of a page (sfConn is bound to a single
+// host), so the call is made once and the promise shared across callers - the
+// page header, flow scanner, and every Live Formula globals card reuse the same
+// result instead of issuing duplicate SOAP calls. Only successful results are
+// memoized; a transient failure (e.g. a not-yet-valid session) clears the memo
+// so the next caller retries. Callers treat the result as read-only.
+let userInfoPromise = null;
+
+export function getUserInfo() {
+  if (!userInfoPromise) {
+    userInfoPromise = fetchUserInfo();
+  }
+  return userInfoPromise;
+}
+
+async function fetchUserInfo() {
   try {
     const res = await sfConn.soap(sfConn.wsdl(apiVersion, "Partner"), "getUserInfo", {});
     return {
@@ -359,6 +375,8 @@ export async function getUserInfo() {
     };
   } catch (error) {
     console.error("Error fetching user info:", error);
+    // Don't memoize a failure - allow a later call to retry once the session is valid.
+    userInfoPromise = null;
     return {
       success: false,
       userInfo: "Error loading user info",
