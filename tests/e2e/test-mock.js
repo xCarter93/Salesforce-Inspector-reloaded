@@ -13,6 +13,8 @@ const accountRecords = [
     Id: TEST_CONSTANTS.accountRecordId,
     Name: "Test Account 1",
     Type: "Customer - Direct",
+    // eslint-disable-next-line camelcase
+    FormulaCheck__c: "Long",
     CreatedBy: {Alias: "testuser"},
     LastModifiedBy: {Alias: "testuser"},
     CreatedDate: "2021-01-01T00:00:00Z",
@@ -23,6 +25,8 @@ const accountRecords = [
     Id: "001000000000000002",
     Name: "Test Account 2",
     Type: "Customer - Channel",
+    // eslint-disable-next-line camelcase
+    FormulaCheck__c: "Long",
     CreatedBy: {Alias: "testuser"},
     LastModifiedBy: {Alias: "testuser"},
     CreatedDate: "2021-01-01T00:00:00Z",
@@ -177,7 +181,8 @@ export async function routeMock(route, host) {
               {value: "Partner", label: "Partner", active: true}
             ],
             referenceTo: []},
-          {name: "Description", label: "Description", type: "textarea", createable: true, updateable: true, nillable: true, referenceTo: []}
+          {name: "Description", label: "Description", type: "textarea", createable: true, updateable: true, nillable: true, referenceTo: []},
+          {name: "FormulaCheck__c", label: "Formula Check", type: "string", calculated: true, calculatedFormula: "\"Summary | Name: \" & Name & \" | Type: \" & IF(ISBLANK(TEXT(Type)), \"Unknown\", TEXT(Type)) & \" | Upper: \" & UPPER(Name) & \" | Length check: \" & IF(LEN(Name) > 3, \"Long\", \"Short\") & \" | Contains Test: \" & IF(CONTAINS(UPPER(Name), \"TEST\"), \"Yes\", \"No\") & \" | Padding text to make this formula result wide enough to exercise horizontal wrapping in the card\"", createable: false, updateable: false, nillable: true, referenceTo: []}
         ],
         childRelationships: [
           {relationshipName: "Contacts", childSObject: "Contact", field: "AccountId"}

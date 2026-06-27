@@ -6,6 +6,8 @@ import {getObjectSetupLinks, getFieldSetupLinks} from "./setup-links.js";
 import {PageHeader} from "./components/PageHeader.js";
 import {UserInfoModel, PromptTemplate, Constants} from "./utils.js";
 import AgentforceModal from "./components/AgentforceModal.js";
+import {FormulaEvalModel, sfTypeToSformula} from "./formula-eval.js";
+import FormulaEvalCard from "./components/FormulaEvalCard.js";
 
 // Constants
 const GET_FIELD_USAGE_LABEL = "Get field usage";
@@ -663,6 +665,10 @@ class RowList {
     return defaultColumns;
   }
 
+  findRow(name) {
+    // Read-only lookup that, unlike getRow, never creates a placeholder row.
+    return this._map.get(name);
+  }
   getRow(name) {
     if (!name) { // related lists may not have a name
       let row = new this._rowConstructor(name, this._nextReactKey++, this);
@@ -1116,6 +1122,8 @@ class FieldRow extends TableRow {
     this.fieldParticleMetadata = undefined;
     this.recordIdPop = null;
     this.fieldActionsOpen = false;
+    this.formulaCardOpen = false;
+    this.formulaEval = null;
     this.fieldSetupLinks = null;
     this.fieldSetupLinksRequested = false;
     this.fieldUsageData = null;
@@ -1324,6 +1332,57 @@ class FieldRow extends TableRow {
     this.rowList.model.openAgentforceFormulaModal(this);
     this.fieldActionsOpen = false;
     this.rowList.model.didUpdate();
+  }
+  toggleFormulaCard(e) {
+    if (e) {
+      e.preventDefault();
+    }
+    this.formulaCardOpen = !this.formulaCardOpen;
+    if (this.formulaCardOpen && !this.formulaEval) {
+      let model = this.rowList.model;
+      let formulaEval = new FormulaEvalModel({
+        formula: this.fieldDescribe?.calculatedFormula || "",
+        returnType: (sfTypeToSformula(this.fieldDescribe) || {}).type || "any",
+        getFieldDescribe: name => {
+          let row = model.fieldRows.findRow(name);
+          return row ? row.fieldDescribe : undefined;
+        },
+        recordData: model.recordData || {},
+        storedValue: this.dataTypedValue,
+        objectName: model.objectName(),
+      }).build();
+      this.formulaEval = formulaEval;
+      this.resolveFormulaRelationships(formulaEval, model);
+    }
+    this.fieldActionsOpen = false;
+    this.rowList.model.didUpdate();
+  }
+  // Asynchronously resolve cross-object (related) field types and values for the
+  // Live Formula card, so references like Account.Name evaluate against real data.
+  resolveFormulaRelationships(formulaEval, model) {
+    if (!model.recordData || !model.recordData.Id) {
+      return;
+    }
+    if (!formulaEval.references.some(ref => ref.kind === "related")) {
+      return;
+    }
+    let objectName = model.objectName();
+    let recordId = model.recordData.Id;
+    let apiPrefix = "/services/data/v" + apiVersion + "/" + (model.useToolingApi ? "tooling/" : "");
+    let describeCache = {};
+    model.spinFor("evaluating formula relationships", formulaEval.resolveRelated({
+      sobjectName: objectName,
+      describe: name => {
+        if (!describeCache[name]) {
+          describeCache[name] = sfConn.rest(apiPrefix + "sobjects/" + name + "/describe/");
+        }
+        return describeCache[name];
+      },
+      fetchRecord: paths => {
+        let soql = "SELECT " + paths.join(", ") + " FROM " + objectName + " WHERE Id = '" + recordId + "' LIMIT 1";
+        return sfConn.rest(apiPrefix + "query/?q=" + encodeURIComponent(soql)).then(res => res.records && res.records[0]);
+      },
+    }).then(() => model.didUpdate()));
   }
   showFieldMetadata() {
     this.rowList.model.showDetailsBox(this.fieldName, this.rowProperties(), this.rowList);
@@ -2133,14 +2192,19 @@ class RowTable extends React.Component {
           h("th", {className: actionsColumn.className + " " + "th-filter-row"})
         ) : null
       ),
-      h("tbody", {}, rowList.rows.map(row =>
+      h("tbody", {}, rowList.rows.flatMap(row => [
         h("tr", {className: classNameForRow(row), hidden: !row.visible(), title: row.summary(), key: row.reactKey},
           selectedColumns.map(col =>
             h(col.reactElement, {key: col.name, row, col, onOpenPopup: this.onOpenPopup})
           ),
           h(actionsColumn.reactElement, {className: actionsColumn.className, row, onOpenPopup: this.onOpenPopup})
-        )
-      ))
+        ),
+        row.formulaCardOpen ? h("tr", {className: "sfir-formula-row", hidden: !row.visible(), key: row.reactKey + "_formula"},
+          h("td", {colSpan: selectedColumns.length + 1},
+            h(FormulaEvalCard, {row})
+          )
+        ) : null
+      ]))
     );
   }
 }
@@ -2478,6 +2542,11 @@ class FieldActionsCell extends React.Component {
         h("ul", {className: "slds-dropdown__list"},
           h("li", {className: "slds-dropdown__item"},
             h("a", {href: "about:blank", onClick: this.onOpenDetails}, "All field metadata")
+          ),
+          row.fieldIsCalculated() && row.fieldDescribe?.calculatedFormula && h("li", {className: "slds-dropdown__item"},
+            h("a", {href: "about:blank", onClick: (e) => row.toggleFormulaCard(e)},
+              row.formulaCardOpen ? "Hide Live Formula" : "Live Formula"
+            )
           ),
           row.fieldIsCalculated() && (localStorage.getItem("showAgentforceHelperInspect") !== "false") && h("li", {className: "slds-dropdown__item"},
             h("a", {href: "about:blank", onClick: (e) => row.openAgentforceHelper(e)},

@@ -652,3 +652,27 @@ When enabled, the **Reset Password** button appears while inspecting a User reco
 > **Note:** If the current session does not have sufficient permissions to access user information or perform a password reset, Salesforce returns an **INSUFFICIENT_ACCESS** error.
 
 <img width="278" height="161" alt="Reset password error" src="https://github.com/user-attachments/assets/5814e9d5-f037-41af-8f84-1997ab539292" />
+
+## Live Formula evaluation (Show All Data)
+
+On the **Show All Data** page, formula fields can be evaluated in real time against the record you are inspecting, so you can understand *why* a formula produced its value.
+
+### How to open it
+
+1. Inspect a record (Show All Data) for an object that has a formula field.
+2. Click the actions menu (the chevron at the end of the field's row).
+3. Choose **Live Formula**. An inline card expands under the field row.
+
+### Using the card
+
+* The formula is rendered with each part highlighted. **Hover or click any sub-expression** — an `IF`, a comparison such as `Amount > 100`, a function call, or a field reference — to see the value it evaluates to for the current record, along with its type.
+* The **Result** line shows the value the whole formula evaluates to. If it differs from the value stored on the record, a note is shown (this can happen with client-side evaluation, cross-object data, or org timezone differences).
+* The **inputs table** lists every field the formula references with its current value. You can **edit any value to run a what-if simulation** — the formula and every sub-expression re-evaluate instantly. Editing here never changes the actual record.
+
+### Notes and limitations
+
+The formula is evaluated entirely in your browser (using the bundled [sformula](https://github.com/stomita/sformula) parser), so there is no extra API call per interaction.
+
+* A few functions are not supported client-side (for example `DISTANCE`, `GEOLOCATION`, `CURRENCYRATE`, `GETSESSIONID`). A sub-expression that can't be evaluated is clearly marked rather than showing an incorrect value.
+* `NOW()` / `TODAY()` use your browser clock and timezone, and multi-currency conversion may differ slightly from the server.
+* Global variables (`$User`, `$Profile`, …) and related/parent fields (`Account.Name`) are shown but may need to be resolved before the parts that use them can be evaluated.

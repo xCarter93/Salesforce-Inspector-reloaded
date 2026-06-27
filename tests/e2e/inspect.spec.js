@@ -354,6 +354,40 @@ test.describe("Inspect", () => {
     }
   });
 
+  test("Live Formula card", async ({page, extensionId}) => {
+    await initInspectPage(page, extensionId, TEST_CONSTANTS.accountRecordId);
+    await page.waitForSelector("table.slds-table", {timeout: 2000});
+
+    // Isolate the formula field row via the field filter
+    await page.locator("input[placeholder='Filter']").fill("FormulaCheck__c");
+    await page.waitForTimeout(300);
+
+    // Open its actions menu and choose Live Formula
+    const row = page.locator("tr", {hasText: "FormulaCheck__c"}).first();
+    await row.locator("td.field-actions button").click();
+    await page.waitForTimeout(200);
+    await page.locator("a:has-text('Live Formula')").click();
+
+    // The inline card appears and evaluates the formula against the record
+    // (IF(LEN(Name) > 3, "Long", "Short") with Name "Test Account 1" -> "Long")
+    const card = page.locator(".sfir-formula-card");
+    await expect(card).toBeVisible();
+    await expect(card.locator(".sfir-formula-result")).toContainText("Long");
+
+    // Opening the card must not push the page into horizontal scrolling, even
+    // for a long formula/result (the card wraps within the table width).
+    const horizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
+    expect(horizontalOverflow).toBe(false);
+
+    // The inputs table lists the referenced field
+    await expect(card.locator(".sfir-formula-inputs")).toContainText("Name");
+
+    // Hovering a sub-expression reveals its value popover
+    await card.locator(".sfir-formula-token").first().hover();
+    await page.waitForTimeout(200);
+    await expect(card.locator(".sfir-formula-pop")).toBeVisible();
+  });
+
   test("Relationship Actions Menu", async ({page, extensionId}) => {
     await initInspectPage(page, extensionId);
 
